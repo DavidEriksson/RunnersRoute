@@ -623,7 +623,7 @@ def main():
         )
         
         # Hantera kartklick
-        if map_data["last_object_clicked_coords"]:
+        if map_data and "last_object_clicked_coords" in map_data and map_data["last_object_clicked_coords"]:
             clicked = map_data["last_object_clicked_coords"]
             coords = (clicked["lat"], clicked["lng"])
             
