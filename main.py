@@ -152,10 +152,11 @@ def get_route_ors(start: Tuple[float, float],
         return None
     
     try:
-        url = f"{ORS_BASE_URL}/v2/directions/foot-walking"
+        url = f"{ORS_BASE_URL}/v2/directions/foot-walking/geojson"
         headers = {
             "Authorization": st.secrets["ORS_API_KEY"],
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Accept": "application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8"
         }
         
         distance_m = distance_km * 1000
@@ -191,15 +192,28 @@ def get_route_ors(start: Tuple[float, float],
         response = requests.post(url, json=body, headers=headers, timeout=30)
         
         if response.status_code != 200:
-            st.error(f"ORS API fel: {response.status_code}")
+            error_msg = f"ORS API fel: {response.status_code}"
+            try:
+                error_data = response.json()
+                if "error" in error_data:
+                    error_msg += f" - {error_data.get('error', {}).get('message', 'Okänt fel')}"
+            except:
+                error_msg += f" - {response.text[:200]}"
+            st.error(error_msg)
             return None
         
         data = response.json()
         
+        # Kontrollera att vi har rätt datastruktur
+        if "features" not in data or not data["features"]:
+            st.error("Ogiltig respons från ORS API - inga rutter hittades")
+            return None
+        
+        feature = data["features"][0]
+        
         # För point-to-point: kolla om vi behöver via-punkter
-        if mode == "point-to-point" and data.get("routes"):
-            route = data["routes"][0]
-            current_distance = route["summary"]["distance"]
+        if mode == "point-to-point" and "properties" in feature:
+            current_distance = feature["properties"].get("summary", {}).get("distance", 0)
             
             # Om distansen inte är inom tolerans, lägg till via-punkter
             if abs(current_distance - distance_m) > tolerance_m:
@@ -212,34 +226,47 @@ def get_route_ors(start: Tuple[float, float],
                     response = requests.post(url, json=body, headers=headers, timeout=30)
                     if response.status_code == 200:
                         data = response.json()
-                        route = data["routes"][0]
-                        current_distance = route["summary"]["distance"]
-                        
-                        if abs(current_distance - distance_m) <= tolerance_m:
-                            break
+                        if "features" in data and data["features"]:
+                            feature = data["features"][0]
+                            current_distance = feature.get("properties", {}).get("summary", {}).get("distance", 0)
+                            
+                            if abs(current_distance - distance_m) <= tolerance_m:
+                                break
         
-        # Extrahera ruttinformation
-        if data.get("routes"):
-            route = data["routes"][0]
-            geometry = route["geometry"]["coordinates"]
+        # Extrahera ruttinformation från GeoJSON
+        if "features" in data and data["features"]:
+            feature = data["features"][0]
+            geometry = feature.get("geometry", {})
+            properties = feature.get("properties", {})
+            
+            # Hämta koordinater
+            coordinates = geometry.get("coordinates", [])
             
             # Skapa RoutePoint-objekt
             points = []
-            elevation_data = route.get("elevation", [])
             
-            for i, coord in enumerate(geometry):
-                elevation = elevation_data[i] if i < len(elevation_data) else None
-                points.append(RoutePoint(
-                    lat=coord[1],
-                    lon=coord[0],
-                    elevation=elevation
-                ))
+            # Kontrollera om vi har höjddata i properties
+            ascent = properties.get("ascent", 0)
             
-            # Beräkna höjdökning
-            elevation_gain = calculate_elevation_gain(points)
+            for coord in coordinates:
+                # GeoJSON format: [lon, lat, elevation(optional)]
+                if len(coord) >= 2:
+                    elevation = coord[2] if len(coord) > 2 else None
+                    points.append(RoutePoint(
+                        lat=coord[1],
+                        lon=coord[0],
+                        elevation=elevation
+                    ))
+            
+            # Använd ascent från properties om tillgänglig, annars beräkna
+            elevation_gain = ascent if ascent > 0 else calculate_elevation_gain(points)
             
             # Beräkna tid baserat på tempo
-            distance = route["summary"]["distance"]
+            distance = properties.get("summary", {}).get("distance", 0)
+            if distance == 0 and points:
+                # Fallback: beräkna distans från punkter om den saknas
+                distance = calculate_distance_from_points(points)
+            
             pace_min = parse_pace(st.session_state.get("pace", DEFAULT_PACE))
             time_minutes = (distance / 1000) * pace_min
             estimated_time = timedelta(minutes=time_minutes)
@@ -249,13 +276,54 @@ def get_route_ors(start: Tuple[float, float],
                 distance=distance,
                 elevation_gain=elevation_gain,
                 estimated_time=estimated_time,
-                geometry=geometry
+                geometry=coordinates
             )
+        else:
+            st.error("Kunde inte extrahera ruttdata från API-svaret")
+            return None
     
+    except requests.exceptions.RequestException as e:
+        st.error(f"Nätverksfel: {str(e)}")
+    except json.JSONDecodeError as e:
+        st.error(f"Kunde inte tolka API-svar: {str(e)}")
     except Exception as e:
         st.error(f"Routing fel: {str(e)}")
+        # Debug info
+        if st.checkbox("Visa debug-information"):
+            st.code(f"Fel: {str(e)}\nTyp: {type(e)}")
     
     return None
+
+def calculate_distance_from_points(points: List[RoutePoint]) -> float:
+    """
+    Beräkna total distans från en lista av punkter (fallback)
+    
+    Args:
+        points: Lista med RoutePoint
+    
+    Returns:
+        Total distans i meter
+    """
+    if len(points) < 2:
+        return 0
+    
+    total_distance = 0
+    for i in range(len(points) - 1):
+        # Haversine formula (förenklad)
+        lat1, lon1 = math.radians(points[i].lat), math.radians(points[i].lon)
+        lat2, lon2 = math.radians(points[i+1].lat), math.radians(points[i+1].lon)
+        
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        
+        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+        c = 2 * math.asin(math.sqrt(a))
+        
+        # Jordens radie i meter
+        r = 6371000
+        total_distance += r * c
+    
+    return total_distance
 
 def calculate_via_points(start: Tuple[float, float], 
                         end: Tuple[float, float],
