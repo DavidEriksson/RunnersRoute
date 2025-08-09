@@ -121,9 +121,9 @@ def reverse_geocode(lat: float, lon: float) -> Optional[str]:
     return None
 
 def create_cache_key(coordinates: List[List[float]], distance: float, 
-                    mode: str, tolerance: float) -> str:
+                    mode: str, tolerance: float, seed: int = 0) -> str:
     """Skapa cache-nyckel för routing"""
-    key_str = f"{coordinates}_{distance}_{mode}_{tolerance}"
+    key_str = f"{coordinates}_{distance}_{mode}_{tolerance}_{seed}"
     return hashlib.md5(key_str.encode()).hexdigest()
 
 @st.cache_data(ttl=3600)
@@ -132,6 +132,7 @@ def get_route_ors(start: Tuple[float, float],
                   distance_km: float,
                   tolerance_percent: float,
                   mode: str = "loop",
+                  seed: int = 0,
                   _cache_key: str = "") -> Optional[RouteInfo]:
     """
     Hämta rutt från OpenRouteService
@@ -163,11 +164,14 @@ def get_route_ors(start: Tuple[float, float],
         tolerance_m = distance_m * (tolerance_percent / 100)
         
         if mode == "loop":
-            # Round trip - använd slumpmässigt seed för variation
+            # Round trip - använd seed parameter eller slumpmässigt
             import random
             
             # Justera antal punkter baserat på distans
             num_points = min(5, max(2, int(distance_km / 2)))
+            
+            # Använd seed om given, annars slumpmässigt
+            route_seed = seed if seed > 0 else random.randint(1, 100000)
             
             body = {
                 "coordinates": [[start[1], start[0]]],  # lon, lat
@@ -176,7 +180,7 @@ def get_route_ors(start: Tuple[float, float],
                     "round_trip": {
                         "length": distance_m,
                         "points": num_points,
-                        "seed": random.randint(0, 100000)
+                        "seed": route_seed
                     }
                 }
             }
@@ -523,6 +527,8 @@ def init_session_state():
         st.session_state.route_info = None
     if "map_click_mode" not in st.session_state:
         st.session_state.map_click_mode = "start"
+    if "route_seed" not in st.session_state:
+        st.session_state.route_seed = 0
 
 def main():
     """Huvudfunktion för Streamlit-appen"""
@@ -645,13 +651,18 @@ def main():
             elif mode == "point-to-point" and not st.session_state.end_coords:
                 st.error("Välj en slutpunkt först!")
             else:
+                # Öka seed för ny variant
+                if regenerate_button:
+                    st.session_state.route_seed += 1
+                
                 with st.spinner("Beräknar rutt..."):
-                    # Skapa cache-nyckel
+                    # Skapa cache-nyckel med seed
                     coords = [[st.session_state.start_coords[1], st.session_state.start_coords[0]]]
                     if mode == "point-to-point":
                         coords.append([st.session_state.end_coords[1], st.session_state.end_coords[0]])
                     
-                    cache_key = create_cache_key(coords, distance, mode, tolerance)
+                    # Inkludera seed i cache-nyckeln
+                    cache_key = create_cache_key(coords, distance, mode, tolerance, st.session_state.route_seed)
                     
                     route_info = get_route_ors(
                         st.session_state.start_coords,
@@ -659,6 +670,7 @@ def main():
                         distance,
                         tolerance,
                         mode,
+                        st.session_state.route_seed,
                         cache_key
                     )
                     
