@@ -163,15 +163,20 @@ def get_route_ors(start: Tuple[float, float],
         tolerance_m = distance_m * (tolerance_percent / 100)
         
         if mode == "loop":
-            # Round trip
+            # Round trip - använd slumpmässigt seed för variation
+            import random
+            
+            # Justera antal punkter baserat på distans
+            num_points = min(5, max(2, int(distance_km / 2)))
+            
             body = {
                 "coordinates": [[start[1], start[0]]],  # lon, lat
                 "elevation": True,
                 "options": {
                     "round_trip": {
                         "length": distance_m,
-                        "points": 3,
-                        "seed": 42
+                        "points": num_points,
+                        "seed": random.randint(0, 100000)
                     }
                 }
             }
@@ -626,7 +631,15 @@ def main():
         st.divider()
         
         # Generera rutt
-        if st.button("Generera rutt", type="primary", use_container_width=True):
+        col_gen1, col_gen2 = st.columns(2)
+        with col_gen1:
+            generate_button = st.button("Generera rutt", type="primary", use_container_width=True)
+        with col_gen2:
+            regenerate_button = st.button("Ny variant", type="secondary", use_container_width=True, 
+                                         disabled=not st.session_state.start_coords,
+                                         help="Generera en annan rutt med samma inställningar")
+        
+        if generate_button or regenerate_button:
             if not st.session_state.start_coords:
                 st.error("Välj en startpunkt först!")
             elif mode == "point-to-point" and not st.session_state.end_coords:
@@ -722,6 +735,12 @@ def main():
                 st.success(f"Inom tolerans: {deviation:+.1f}%")
             else:
                 st.warning(f"Utanför tolerans: {deviation:+.1f}%")
+                
+                # Ge förslag vid stor avvikelse
+                if deviation > st.session_state.tolerance:
+                    st.info("💡 Tips: Försök generera rutten igen för en annan variant, eller öka toleransen.")
+                else:
+                    st.info("💡 Tips: Rutten är kortare än önskat. Försök generera igen eller justera startpunkt.")
             
             st.divider()
             
