@@ -269,6 +269,9 @@ class GraphHopperProvider(RoutingProvider):
         attempts_info = []
         found_within_tolerance = False
         
+        # Beräkna tolerance_percent från tolerance_m
+        tolerance_percent = (tolerance_m / distance_m) * 100
+        
         # GraphHopper har ofta bättre precision, så vi testar färre varianter
         max_attempts = 5
         
