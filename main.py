@@ -73,17 +73,6 @@ def main():
             key="distance"
         )
         
-        # Tolerans
-        tolerance = st.slider(
-            "Tolerans (%)",
-            min_value=1.0,
-            max_value=20.0,
-            value=st.session_state.tolerance,
-            step=1.0,
-            key="tolerance",
-            help="Hur mycket rutten får avvika från önskad distans"
-        )
-        
         st.divider()
         
         # Startpunkt
@@ -155,9 +144,12 @@ def main():
                     if mode == "point-to-point":
                         coords.append([st.session_state.end_coords[1], st.session_state.end_coords[0]])
                     
+                    # Fast tolerans på 5%
+                    tolerance = 5.0
+                    
                     cache_key = create_cache_key(
                         coords, distance, mode, tolerance, 
-                        st.session_state.route_seed, "auto"  # Alltid använd auto
+                        st.session_state.route_seed, "auto"
                     )
                     
                     route_info = get_best_route(
@@ -167,13 +159,12 @@ def main():
                         tolerance,
                         mode,
                         st.session_state.route_seed,
-                        "auto",  # Alltid använd auto
+                        "auto",
                         cache_key
                     )
                     
                     if route_info:
                         st.session_state.route_info = route_info
-                        st.success(f"Rutt genererad med {route_info.provider}!")
                     else:
                         st.error("Kunde inte generera rutt. Försök justera inställningarna.")
     
@@ -183,15 +174,28 @@ def main():
     with col1:
         st.subheader("Karta")
         
-        # Info om klickläge
+        # Info om klickläge med tydligare instruktioner
+        st.info("💡 Tips: Skriv adress i sidofältet eller använd knapparna nedan för att sätta punkter på kartan")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📍 Sätt startpunkt här", use_container_width=True):
+                # Använd kartans centrum som startpunkt
+                if map_data and "center" in map_data:
+                    center_coords = (map_data["center"]["lat"], map_data["center"]["lng"])
+                    st.session_state.start_coords = center_coords
+                    st.success("Startpunkt satt i kartans centrum")
+                    st.rerun()
+        
         if st.session_state.mode == "point-to-point":
-            click_mode = st.radio(
-                "Klickläge",
-                ["start", "end"],
-                format_func=lambda x: "Sätt startpunkt" if x == "start" else "Sätt slutpunkt",
-                horizontal=True,
-                key="map_click_mode"
-            )
+            with col2:
+                if st.button("🏁 Sätt slutpunkt här", use_container_width=True):
+                    # Använd kartans centrum som slutpunkt
+                    if map_data and "center" in map_data:
+                        center_coords = (map_data["center"]["lat"], map_data["center"]["lng"])
+                        st.session_state.end_coords = center_coords
+                        st.success("Slutpunkt satt i kartans centrum")
+                        st.rerun()
         
         # Skapa karta
         center = list(st.session_state.start_coords) if st.session_state.start_coords else DEFAULT_CENTER
@@ -209,25 +213,57 @@ def main():
             key="map",
             width=None,
             height=500,
-            returned_objects=["last_object_clicked"]
+            returned_objects=["last_object_clicked", "center", "last_object_clicked_popup"]
         )
         
-        # Hantera kartklick
-        if map_data and map_data.get("last_object_clicked"):
-            clicked = map_data["last_object_clicked"]
-            if clicked.get("lat") and clicked.get("lng"):
-                coords = (clicked["lat"], clicked["lng"])
-                
-                if st.session_state.map_click_mode == "start" or st.session_state.mode == "loop":
-                    st.session_state.start_coords = coords
-                    address = reverse_geocode(coords[0], coords[1])
-                    st.info(f"Startpunkt satt: {address or f'{coords[0]:.4f}, {coords[1]:.4f}'}")
-                    st.rerun()
-                else:
-                    st.session_state.end_coords = coords
-                    address = reverse_geocode(coords[0], coords[1])
-                    st.info(f"Slutpunkt satt: {address or f'{coords[0]:.4f}, {coords[1]:.4f}'}")
-                    st.rerun()
+        # Debug för att se vad vi får från kartan
+        if st.checkbox("Visa kartdata (debug)", value=False, key="debug_map"):
+            st.json(map_data)
+        
+        # Hantera kartklick - prova olika sätt att få koordinater
+        clicked_coords = None
+        
+        # Metod 1: last_object_clicked
+        if map_data.get("last_object_clicked"):
+            obj = map_data["last_object_clicked"]
+            if isinstance(obj, dict):
+                if "lat" in obj and "lng" in obj:
+                    clicked_coords = (obj["lat"], obj["lng"])
+                elif "popup" in obj:
+                    # Ibland kommer koordinater i popup
+                    try:
+                        import re
+                        popup_text = str(obj.get("popup", ""))
+                        # Leta efter koordinater i formatet lat, lng
+                        match = re.search(r'([-\d.]+),\s*([-\d.]+)', popup_text)
+                        if match:
+                            clicked_coords = (float(match.group(1)), float(match.group(2)))
+                    except:
+                        pass
+        
+        # Metod 2: last_object_clicked_popup
+        if not clicked_coords and map_data.get("last_object_clicked_popup"):
+            try:
+                import re
+                popup_text = str(map_data["last_object_clicked_popup"])
+                match = re.search(r'([-\d.]+),\s*([-\d.]+)', popup_text)
+                if match:
+                    clicked_coords = (float(match.group(1)), float(match.group(2)))
+            except:
+                pass
+        
+        # Om vi har koordinater, uppdatera start/slut
+        if clicked_coords:
+            if st.session_state.map_click_mode == "start" or st.session_state.mode == "loop":
+                st.session_state.start_coords = clicked_coords
+                address = reverse_geocode(clicked_coords[0], clicked_coords[1])
+                st.success(f"Startpunkt satt via karta")
+                st.rerun()
+            else:
+                st.session_state.end_coords = clicked_coords
+                address = reverse_geocode(clicked_coords[0], clicked_coords[1])
+                st.success(f"Slutpunkt satt via karta")
+                st.rerun()
     
     with col2:
         st.subheader("Sammanfattning")
@@ -246,15 +282,6 @@ def main():
             mins = int(time_minutes % 60)
             time_str = f"{hours}:{mins:02d}" if hours > 0 else f"{mins} min"
             st.metric("Uppskattad tid", time_str)
-            
-            # Toleransinfo
-            target_distance = st.session_state.distance * 1000
-            deviation = ((route.distance - target_distance) / target_distance) * 100
-            if abs(deviation) <= st.session_state.tolerance:
-                st.success(f"Inom tolerans: {deviation:+.1f}%")
-            else:
-                st.warning(f"Utanför tolerans: {deviation:+.1f}%")
-                st.info("Tips: Klicka 'Ny variant' för att testa andra rutter")
             
             st.divider()
             

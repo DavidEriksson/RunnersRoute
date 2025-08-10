@@ -144,8 +144,8 @@ class OpenRouteServiceProvider(RoutingProvider):
             except Exception:
                 continue
         
-        # Visa resultat
-        if attempts_info:
+        # Visa resultat endast om debug mode
+        if attempts_info and st.checkbox("Visa debug", value=False, key="debug_ors"):
             with st.expander(f"ORS testade {len(attempts_info)} varianter", expanded=False):
                 for info in attempts_info:
                     st.text(info)
@@ -325,8 +325,8 @@ class GraphHopperProvider(RoutingProvider):
                 st.warning(f"GraphHopper fel: {str(e)}")
                 continue
         
-        # Visa resultat
-        if attempts_info:
+        # Visa resultat endast om debug mode
+        if attempts_info and st.checkbox("Visa debug", value=False, key="debug_gh"):
             with st.expander(f"GraphHopper testade {len(attempts_info)} varianter", expanded=False):
                 for info in attempts_info:
                     st.text(info)

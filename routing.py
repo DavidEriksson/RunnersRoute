@@ -83,7 +83,7 @@ def get_best_route(
                 if gh_route:
                     routes.append(gh_route)
     
-    # Om vi har flera rutter, välj den bästa
+    # Om vi har flera rutter, välj den bästa (tyst)
     if len(routes) > 1:
         target_distance = distance_km * 1000
         tolerance_m = target_distance * (tolerance_percent / 100)
@@ -96,13 +96,5 @@ def get_best_route(
             return (0 if within_tolerance else 1, deviation)
         
         routes.sort(key=route_score)
-        
-        # Visa jämförelse
-        with st.expander("Jämförelse mellan providers", expanded=False):
-            for route in routes:
-                deviation_percent = ((route.distance - target_distance) / target_distance) * 100
-                status = "✓" if abs(deviation_percent) <= tolerance_percent else ""
-                st.text(f"{route.provider}: {route.distance/1000:.2f} km ({deviation_percent:+.1f}%) {status}")
-            st.info(f"Valde {routes[0].provider} (närmast {distance_km} km)")
     
     return routes[0] if routes else None
