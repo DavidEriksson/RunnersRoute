@@ -80,8 +80,7 @@ def main():
         start_address = st.text_input(
             "Startadress",
             placeholder="T.ex. Kungsgatan 1, Stockholm",
-            key="start_address",
-            help="Skriv en adress eller klicka på kartan"
+            key="start_address"
         )
         
         # Auto-geokoda när adressen ändras
@@ -91,7 +90,7 @@ def main():
                 if coords:
                     st.session_state.start_coords = coords
                     st.session_state.last_start_address = start_address
-                    st.success(f"Startpunkt: {coords[0]:.4f}, {coords[1]:.4f}")
+                    st.success(f"Startpunkt hittad")
                 else:
                     st.error("Kunde inte hitta adressen")
         
@@ -102,8 +101,7 @@ def main():
             end_address = st.text_input(
                 "Slutadress",
                 placeholder="T.ex. Stureplan, Stockholm",
-                key="end_address",
-                help="Skriv en adress eller klicka på kartan"
+                key="end_address"
             )
             
             # Auto-geokoda när adressen ändras
@@ -113,7 +111,7 @@ def main():
                     if coords:
                         st.session_state.end_coords = coords
                         st.session_state.last_end_address = end_address
-                        st.success(f"Slutpunkt: {coords[0]:.4f}, {coords[1]:.4f}")
+                        st.success(f"Slutpunkt hittad")
                     else:
                         st.error("Kunde inte hitta adressen")
         
@@ -174,29 +172,6 @@ def main():
     with col1:
         st.subheader("Karta")
         
-        # Info om klickläge med tydligare instruktioner
-        st.info("💡 Tips: Skriv adress i sidofältet eller använd knapparna nedan för att sätta punkter på kartan")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📍 Sätt startpunkt här", use_container_width=True):
-                # Använd kartans centrum som startpunkt
-                if map_data and "center" in map_data:
-                    center_coords = (map_data["center"]["lat"], map_data["center"]["lng"])
-                    st.session_state.start_coords = center_coords
-                    st.success("Startpunkt satt i kartans centrum")
-                    st.rerun()
-        
-        if st.session_state.mode == "point-to-point":
-            with col2:
-                if st.button("🏁 Sätt slutpunkt här", use_container_width=True):
-                    # Använd kartans centrum som slutpunkt
-                    if map_data and "center" in map_data:
-                        center_coords = (map_data["center"]["lat"], map_data["center"]["lng"])
-                        st.session_state.end_coords = center_coords
-                        st.success("Slutpunkt satt i kartans centrum")
-                        st.rerun()
-        
         # Skapa karta
         center = list(st.session_state.start_coords) if st.session_state.start_coords else DEFAULT_CENTER
         
@@ -207,63 +182,13 @@ def main():
             st.session_state.end_coords if st.session_state.mode == "point-to-point" else None
         )
         
-        # Visa karta med interaktion
-        map_data = st_folium(
+        # Visa karta
+        st_folium(
             m,
             key="map",
             width=None,
-            height=500,
-            returned_objects=["last_object_clicked", "center", "last_object_clicked_popup"]
+            height=500
         )
-        
-        # Debug för att se vad vi får från kartan
-        if st.checkbox("Visa kartdata (debug)", value=False, key="debug_map"):
-            st.json(map_data)
-        
-        # Hantera kartklick - prova olika sätt att få koordinater
-        clicked_coords = None
-        
-        # Metod 1: last_object_clicked
-        if map_data.get("last_object_clicked"):
-            obj = map_data["last_object_clicked"]
-            if isinstance(obj, dict):
-                if "lat" in obj and "lng" in obj:
-                    clicked_coords = (obj["lat"], obj["lng"])
-                elif "popup" in obj:
-                    # Ibland kommer koordinater i popup
-                    try:
-                        import re
-                        popup_text = str(obj.get("popup", ""))
-                        # Leta efter koordinater i formatet lat, lng
-                        match = re.search(r'([-\d.]+),\s*([-\d.]+)', popup_text)
-                        if match:
-                            clicked_coords = (float(match.group(1)), float(match.group(2)))
-                    except:
-                        pass
-        
-        # Metod 2: last_object_clicked_popup
-        if not clicked_coords and map_data.get("last_object_clicked_popup"):
-            try:
-                import re
-                popup_text = str(map_data["last_object_clicked_popup"])
-                match = re.search(r'([-\d.]+),\s*([-\d.]+)', popup_text)
-                if match:
-                    clicked_coords = (float(match.group(1)), float(match.group(2)))
-            except:
-                pass
-        
-        # Om vi har koordinater, uppdatera start/slut
-        if clicked_coords:
-            if st.session_state.map_click_mode == "start" or st.session_state.mode == "loop":
-                st.session_state.start_coords = clicked_coords
-                address = reverse_geocode(clicked_coords[0], clicked_coords[1])
-                st.success(f"Startpunkt satt via karta")
-                st.rerun()
-            else:
-                st.session_state.end_coords = clicked_coords
-                address = reverse_geocode(clicked_coords[0], clicked_coords[1])
-                st.success(f"Slutpunkt satt via karta")
-                st.rerun()
     
     with col2:
         st.subheader("Sammanfattning")

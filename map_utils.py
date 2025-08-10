@@ -30,9 +30,6 @@ def create_map(
         control_scale=True
     )
     
-    # Gör kartan klickbar
-    m.add_child(folium.LatLngPopup())
-    
     # Lägg till startmarkör
     if start_marker:
         folium.Marker(
