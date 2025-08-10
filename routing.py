@@ -30,7 +30,8 @@ def get_best_route(
     mode: str = "loop",
     seed: int = 0,
     provider: str = "auto",
-    _cache_key: str = ""
+    _cache_key: str = "",
+    surface_preference: str = "any"
 ) -> Optional[RouteInfo]:
     """
     Hämta bästa möjliga rutt från tillgängliga providers
@@ -44,6 +45,7 @@ def get_best_route(
         seed: Seed för variation
         provider: "auto", "ors", "graphhopper", eller "both"
         _cache_key: Cache-nyckel
+        surface_preference: "any", "paved", "unpaved", "trail"
     
     Returns:
         RouteInfo eller None vid fel
@@ -68,7 +70,7 @@ def get_best_route(
             with st.spinner("Testar OpenRouteService..."):
                 ors_provider = OpenRouteServiceProvider()
                 ors_route = ors_provider.get_route(
-                    start, end, distance_km, tolerance_percent, mode, seed
+                    start, end, distance_km, tolerance_percent, mode, seed, surface_preference
                 )
                 if ors_route:
                     routes.append(ors_route)
@@ -78,7 +80,7 @@ def get_best_route(
             with st.spinner("Testar GraphHopper..."):
                 gh_provider = GraphHopperProvider()
                 gh_route = gh_provider.get_route(
-                    start, end, distance_km, tolerance_percent, mode, seed
+                    start, end, distance_km, tolerance_percent, mode, seed, surface_preference
                 )
                 if gh_route:
                     routes.append(gh_route)

@@ -44,9 +44,10 @@ class OpenRouteServiceProvider(RoutingProvider):
         distance_km: float,
         tolerance_percent: float,
         mode: str = "loop",
-        seed: int = 0
+        seed: int = 0,
+        surface_preference: str = "any"
     ) -> Optional[RouteInfo]:
-        """Hämta rutt från OpenRouteService"""
+        """Hämta rutt från OpenRouteService med underlagsval"""
         
         if "ORS_API_KEY" not in st.secrets:
             return None
@@ -62,7 +63,7 @@ class OpenRouteServiceProvider(RoutingProvider):
         
         if mode == "loop":
             best_route = self._find_best_loop_route(
-                start, distance_m, tolerance_m, headers, url, seed
+                start, distance_m, tolerance_m, headers, url, seed, surface_preference
             )
             if best_route:
                 return self._parse_ors_response(best_route)
@@ -71,7 +72,7 @@ class OpenRouteServiceProvider(RoutingProvider):
             if not end:
                 return None
             route_data = self._get_point_to_point_route(
-                start, end, distance_m, tolerance_m, headers, url
+                start, end, distance_m, tolerance_m, headers, url, surface_preference
             )
             if route_data:
                 return self._parse_ors_response(route_data)
@@ -85,7 +86,8 @@ class OpenRouteServiceProvider(RoutingProvider):
         tolerance_m: float,
         headers: dict,
         url: str,
-        seed: int
+        seed: int,
+        surface_preference: str = "any"
     ) -> Optional[dict]:
         """Hitta bästa loop-rutten genom att testa flera varianter"""
         
@@ -97,19 +99,35 @@ class OpenRouteServiceProvider(RoutingProvider):
         # Justera antal punkter baserat på distans
         num_points = min(5, max(2, int(distance_m / 2000)))
         
+        # Lägg till preferenser baserat på underlagsval
+        options = {
+            "round_trip": {
+                "length": distance_m,
+                "points": num_points,
+                "seed": 0  # Kommer uppdateras i loopen
+            }
+        }
+        
+        # ORS stöder avoid_features för att undvika vissa typer
+        if surface_preference == "paved":
+            options["avoid_features"] = ["tracks", "footways"]
+        elif surface_preference == "unpaved":
+            options["prefer_features"] = ["tracks", "footways"]
+        elif surface_preference == "trail":
+            options["prefer_features"] = ["tracks"]
+            options["avoid_features"] = ["highways"]
+        
         for attempt in range(MAX_ROUTE_ATTEMPTS):
             route_seed = seed + attempt if seed > 0 else random.randint(1, 100000)
+            
+            # Uppdatera seed för denna iteration
+            current_options = options.copy()
+            current_options["round_trip"]["seed"] = route_seed
             
             body = {
                 "coordinates": [[start[1], start[0]]],
                 "elevation": True,
-                "options": {
-                    "round_trip": {
-                        "length": distance_m,
-                        "points": num_points,
-                        "seed": route_seed
-                    }
-                }
+                "options": current_options
             }
             
             try:
@@ -163,15 +181,30 @@ class OpenRouteServiceProvider(RoutingProvider):
         distance_m: float,
         tolerance_m: float,
         headers: dict,
-        url: str
+        url: str,
+        surface_preference: str = "any"
     ) -> Optional[dict]:
         """Hämta point-to-point rutt"""
+        
+        options = {}
+        
+        # Lägg till preferenser baserat på underlagsval
+        if surface_preference == "paved":
+            options["avoid_features"] = ["tracks", "footways"]
+        elif surface_preference == "unpaved":
+            options["prefer_features"] = ["tracks", "footways"]
+        elif surface_preference == "trail":
+            options["prefer_features"] = ["tracks"]
+            options["avoid_features"] = ["highways"]
         
         body = {
             "coordinates": [[start[1], start[0]], [end[1], end[0]]],
             "elevation": True,
             "instructions": False
         }
+        
+        if options:
+            body["options"] = options
         
         try:
             response = requests.post(url, json=body, headers=headers, timeout=30)
@@ -236,9 +269,10 @@ class GraphHopperProvider(RoutingProvider):
         distance_km: float,
         tolerance_percent: float,
         mode: str = "loop",
-        seed: int = 0
+        seed: int = 0,
+        surface_preference: str = "any"
     ) -> Optional[RouteInfo]:
-        """Hämta rutt från GraphHopper"""
+        """Hämta rutt från GraphHopper med underlagsval"""
         
         if "GRAPHHOPPER_API_KEY" not in st.secrets:
             return None
@@ -247,20 +281,21 @@ class GraphHopperProvider(RoutingProvider):
         tolerance_m = distance_m * (tolerance_percent / 100)
         
         if mode == "loop":
-            return self._get_round_trip(start, distance_m, tolerance_m, seed)
+            return self._get_round_trip(start, distance_m, tolerance_m, seed, surface_preference)
         else:
             if not end:
                 return None
-            return self._get_point_to_point(start, end)
+            return self._get_point_to_point(start, end, surface_preference)
     
     def _get_round_trip(
         self,
         start: Tuple[float, float],
         distance_m: float,
         tolerance_m: float,
-        seed: int
+        seed: int,
+        surface_preference: str = "any"
     ) -> Optional[RouteInfo]:
-        """Hämta round trip från GraphHopper"""
+        """Hämta round trip från GraphHopper med underlagsval"""
         
         url = f"{GRAPHHOPPER_BASE_URL}/route"
         
@@ -275,6 +310,15 @@ class GraphHopperProvider(RoutingProvider):
         # GraphHopper har ofta bättre precision, så vi testar färre varianter
         max_attempts = 5
         
+        # Välj profil baserat på underlagsval
+        profile_map = {
+            "any": "foot",
+            "paved": "foot",  # Med ch.disable för custom weighting
+            "unpaved": "hike",
+            "trail": "hike"
+        }
+        vehicle = profile_map.get(surface_preference, "foot")
+        
         for attempt in range(max_attempts):
             current_seed = seed + attempt if seed > 0 else random.randint(1, 100000)
             
@@ -285,7 +329,7 @@ class GraphHopperProvider(RoutingProvider):
             params = {
                 "key": st.secrets["GRAPHHOPPER_API_KEY"],
                 "point": f"{start[0]},{start[1]}",
-                "vehicle": "foot",
+                "vehicle": vehicle,
                 "algorithm": "round_trip",
                 "round_trip.distance": int(adjusted_distance),
                 "round_trip.seed": current_seed,
@@ -293,6 +337,27 @@ class GraphHopperProvider(RoutingProvider):
                 "points_encoded": "false",
                 "locale": "sv"
             }
+            
+            # Lägg till custom weighting för underlagsval
+            if surface_preference == "paved":
+                params["ch.disable"] = "true"
+                params["custom_model"] = {
+                    "priority": [
+                        {"if": "surface == paved", "multiply_by": 2.0},
+                        {"if": "surface == asphalt", "multiply_by": 2.0},
+                        {"if": "surface == concrete", "multiply_by": 1.8}
+                    ]
+                }
+            elif surface_preference == "trail":
+                params["ch.disable"] = "true"
+                params["custom_model"] = {
+                    "priority": [
+                        {"if": "surface == ground", "multiply_by": 2.0},
+                        {"if": "surface == dirt", "multiply_by": 2.0},
+                        {"if": "surface == grass", "multiply_by": 1.8},
+                        {"if": "highway == path", "multiply_by": 1.5}
+                    ]
+                }
             
             try:
                 response = requests.get(url, params=params, timeout=30)
@@ -343,19 +408,48 @@ class GraphHopperProvider(RoutingProvider):
     def _get_point_to_point(
         self,
         start: Tuple[float, float],
-        end: Tuple[float, float]
+        end: Tuple[float, float],
+        surface_preference: str = "any"
     ) -> Optional[RouteInfo]:
-        """Hämta point-to-point rutt från GraphHopper"""
+        """Hämta point-to-point rutt från GraphHopper med underlagsval"""
         
         url = f"{GRAPHHOPPER_BASE_URL}/route"
+        
+        # Välj profil baserat på underlagsval
+        profile_map = {
+            "any": "foot",
+            "paved": "foot",
+            "unpaved": "hike",
+            "trail": "hike"
+        }
+        vehicle = profile_map.get(surface_preference, "foot")
+        
         params = {
             "key": st.secrets["GRAPHHOPPER_API_KEY"],
             "point": [f"{start[0]},{start[1]}", f"{end[0]},{end[1]}"],
-            "vehicle": "foot",
+            "vehicle": vehicle,
             "elevation": "true",
             "points_encoded": "false",
             "locale": "sv"
         }
+        
+        # Lägg till custom weighting för underlagsval
+        if surface_preference == "paved":
+            params["ch.disable"] = "true"
+            params["custom_model"] = {
+                "priority": [
+                    {"if": "surface == paved", "multiply_by": 2.0},
+                    {"if": "surface == asphalt", "multiply_by": 2.0}
+                ]
+            }
+        elif surface_preference == "trail":
+            params["ch.disable"] = "true"
+            params["custom_model"] = {
+                "priority": [
+                    {"if": "surface == ground", "multiply_by": 2.0},
+                    {"if": "highway == path", "multiply_by": 1.5}
+                ]
+            }
         
         try:
             response = requests.get(url, params=params, timeout=30)

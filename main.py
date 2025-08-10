@@ -73,6 +73,20 @@ def main():
             key="distance"
         )
         
+        # Underlagstyp
+        surface_preference = st.selectbox(
+            "Underlag",
+            ["any", "paved", "unpaved", "trail"],
+            format_func=lambda x: {
+                "any": "Alla underlag",
+                "paved": "Asfalt/vägar",
+                "unpaved": "Grus/naturstigar", 
+                "trail": "Skogsstigar"
+            }.get(x, x),
+            key="surface_preference",
+            help="Välj vilket underlag du föredrar för din löprunda"
+        )
+        
         st.divider()
         
         # Startpunkt
@@ -145,6 +159,9 @@ def main():
                     # Fast tolerans på 5%
                     tolerance = 5.0
                     
+                    # Hämta underlagsval
+                    surface_pref = st.session_state.get("surface_preference", "any")
+                    
                     cache_key = create_cache_key(
                         coords, distance, mode, tolerance, 
                         st.session_state.route_seed, "auto"
@@ -158,7 +175,8 @@ def main():
                         mode,
                         st.session_state.route_seed,
                         "auto",
-                        cache_key
+                        cache_key,
+                        surface_preference=surface_pref
                     )
                     
                     if route_info:
