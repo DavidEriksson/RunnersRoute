@@ -21,7 +21,6 @@ def create_cache_key(
     key_str = f"{coordinates}_{distance}_{mode}_{tolerance}_{seed}_{provider}"
     return hashlib.md5(key_str.encode()).hexdigest()
 
-@st.cache_data(ttl=CACHE_TTL)
 def get_best_route(
     start: Tuple[float, float],
     end: Optional[Tuple[float, float]],
@@ -35,6 +34,7 @@ def get_best_route(
 ) -> Optional[RouteInfo]:
     """
     Hämta bästa möjliga rutt från tillgängliga providers
+    OBS: Ingen caching här för att "Ny variant" ska fungera
     
     Args:
         start: (lat, lon) för startpunkt
@@ -44,7 +44,7 @@ def get_best_route(
         mode: "loop" eller "point-to-point"
         seed: Seed för variation
         provider: "auto", "ors", "graphhopper", eller "both"
-        _cache_key: Cache-nyckel
+        _cache_key: Cache-nyckel (används inte längre)
         surface_preference: "any", "paved", "unpaved", "trail"
     
     Returns:
@@ -67,23 +67,21 @@ def get_best_route(
     # Hämta rutter från valda providers
     if provider in ["ors", "both"]:
         if "ORS_API_KEY" in st.secrets:
-            with st.spinner("Testar OpenRouteService..."):
-                ors_provider = OpenRouteServiceProvider()
-                ors_route = ors_provider.get_route(
-                    start, end, distance_km, tolerance_percent, mode, seed, surface_preference
-                )
-                if ors_route:
-                    routes.append(ors_route)
+            ors_provider = OpenRouteServiceProvider()
+            ors_route = ors_provider.get_route(
+                start, end, distance_km, tolerance_percent, mode, seed, surface_preference
+            )
+            if ors_route:
+                routes.append(ors_route)
     
     if provider in ["graphhopper", "both"]:
         if "GRAPHHOPPER_API_KEY" in st.secrets:
-            with st.spinner("Testar GraphHopper..."):
-                gh_provider = GraphHopperProvider()
-                gh_route = gh_provider.get_route(
-                    start, end, distance_km, tolerance_percent, mode, seed, surface_preference
-                )
-                if gh_route:
-                    routes.append(gh_route)
+            gh_provider = GraphHopperProvider()
+            gh_route = gh_provider.get_route(
+                start, end, distance_km, tolerance_percent, mode, seed, surface_preference
+            )
+            if gh_route:
+                routes.append(gh_route)
     
     # Om vi har flera rutter, välj den bästa (tyst)
     if len(routes) > 1:
