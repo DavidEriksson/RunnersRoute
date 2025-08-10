@@ -5,6 +5,7 @@ Huvudapplikation för Streamlit löparruttplanerare
 import streamlit as st
 from streamlit_folium import st_folium
 from datetime import datetime
+import hashlib
 
 # Importera moduler
 from config import DEFAULT_DISTANCE, DEFAULT_TOLERANCE, DEFAULT_PACE, DEFAULT_CENTER
