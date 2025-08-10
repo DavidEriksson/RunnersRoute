@@ -30,6 +30,9 @@ def create_map(
         control_scale=True
     )
     
+    # Gör kartan klickbar
+    m.add_child(folium.LatLngPopup())
+    
     # Lägg till startmarkör
     if start_marker:
         folium.Marker(
@@ -50,19 +53,12 @@ def create_map(
     if route_info and route_info.points:
         route_coords = [[p.lat, p.lon] for p in route_info.points]
         
-        # Olika färger beroende på provider
-        color_map = {
-            "ORS": "blue",
-            "GraphHopper": "purple"
-        }
-        color = color_map.get(route_info.provider, "blue")
-        
         folium.PolyLine(
             route_coords,
-            color=color,
+            color="blue",
             weight=4,
             opacity=0.8,
-            popup=f"{route_info.provider}: {route_info.distance/1000:.2f} km"
+            popup=f"{route_info.distance/1000:.2f} km"
         ).add_to(m)
         
         # Anpassa zoom för att visa hela rutten

@@ -33,8 +33,10 @@ def init_session_state():
         st.session_state.map_click_mode = "start"
     if "route_seed" not in st.session_state:
         st.session_state.route_seed = 0
-    if "provider" not in st.session_state:
-        st.session_state.provider = "auto"
+    if "last_start_address" not in st.session_state:
+        st.session_state.last_start_address = ""
+    if "last_end_address" not in st.session_state:
+        st.session_state.last_end_address = ""
 
 def main():
     """Huvudfunktion för Streamlit-appen"""
@@ -82,71 +84,24 @@ def main():
             help="Hur mycket rutten får avvika från önskad distans"
         )
         
-        # Tempo
-        pace = st.text_input(
-            "Tempo (min/km)",
-            value=st.session_state.pace,
-            key="pace",
-            help="Format: MM:SS, t.ex. 5:30"
-        )
-        
-        st.divider()
-        
-        # Avancerade inställningar
-        with st.expander("Avancerade inställningar"):
-            # Provider-val
-            provider_options = ["auto"]
-            if "ORS_API_KEY" in st.secrets:
-                provider_options.append("ors")
-            if "GRAPHHOPPER_API_KEY" in st.secrets:
-                provider_options.append("graphhopper")
-            if len(provider_options) > 2:
-                provider_options.append("both")
-            
-            st.session_state.provider = st.selectbox(
-                "Routing-provider",
-                provider_options,
-                format_func=lambda x: {
-                    "auto": "Automatisk (välj bästa)",
-                    "ors": "OpenRouteService",
-                    "graphhopper": "GraphHopper (ofta mer exakt)",
-                    "both": "Testa båda (jämför resultat)"
-                }.get(x, x),
-                help="GraphHopper ger ofta mer exakta rundor"
-            )
-            
-            # Visa API-status
-            st.caption("API-nycklar konfigurerade:")
-            if "ORS_API_KEY" in st.secrets:
-                st.caption("✓ OpenRouteService")
-            else:
-                st.caption("✗ OpenRouteService")
-            if "GRAPHHOPPER_API_KEY" in st.secrets:
-                st.caption("✓ GraphHopper")
-            else:
-                st.caption("✗ GraphHopper")
-        
         st.divider()
         
         # Startpunkt
         st.subheader("Startpunkt")
-        start_method = st.radio(
-            "Välj metod",
-            ["address", "map"],
-            format_func=lambda x: "Adress" if x == "address" else "Klick på karta",
-            key="start_method"
+        start_address = st.text_input(
+            "Startadress",
+            placeholder="T.ex. Kungsgatan 1, Stockholm",
+            key="start_address",
+            help="Skriv en adress eller klicka på kartan"
         )
         
-        if start_method == "address":
-            start_address = st.text_input(
-                "Startadress",
-                placeholder="T.ex. Kungsgatan 1, Stockholm",
-                key="start_address"
-            )
-            if st.button("Geokoda start", key="geocode_start"):
+        # Auto-geokoda när adressen ändras
+        if start_address and start_address != st.session_state.last_start_address:
+            with st.spinner("Söker adress..."):
                 coords = geocode_address(start_address)
                 if coords:
                     st.session_state.start_coords = coords
+                    st.session_state.last_start_address = start_address
                     st.success(f"Startpunkt: {coords[0]:.4f}, {coords[1]:.4f}")
                 else:
                     st.error("Kunde inte hitta adressen")
@@ -155,23 +110,20 @@ def main():
         if mode == "point-to-point":
             st.divider()
             st.subheader("Slutpunkt")
-            end_method = st.radio(
-                "Välj metod",
-                ["address", "map"],
-                format_func=lambda x: "Adress" if x == "address" else "Klick på karta",
-                key="end_method"
+            end_address = st.text_input(
+                "Slutadress",
+                placeholder="T.ex. Stureplan, Stockholm",
+                key="end_address",
+                help="Skriv en adress eller klicka på kartan"
             )
             
-            if end_method == "address":
-                end_address = st.text_input(
-                    "Slutadress",
-                    placeholder="T.ex. Stureplan, Stockholm",
-                    key="end_address"
-                )
-                if st.button("Geokoda slut", key="geocode_end"):
+            # Auto-geokoda när adressen ändras
+            if end_address and end_address != st.session_state.last_end_address:
+                with st.spinner("Söker adress..."):
                     coords = geocode_address(end_address)
                     if coords:
                         st.session_state.end_coords = coords
+                        st.session_state.last_end_address = end_address
                         st.success(f"Slutpunkt: {coords[0]:.4f}, {coords[1]:.4f}")
                     else:
                         st.error("Kunde inte hitta adressen")
@@ -205,7 +157,7 @@ def main():
                     
                     cache_key = create_cache_key(
                         coords, distance, mode, tolerance, 
-                        st.session_state.route_seed, st.session_state.provider
+                        st.session_state.route_seed, "auto"  # Alltid använd auto
                     )
                     
                     route_info = get_best_route(
@@ -215,7 +167,7 @@ def main():
                         tolerance,
                         mode,
                         st.session_state.route_seed,
-                        st.session_state.provider,
+                        "auto",  # Alltid använd auto
                         cache_key
                     )
                     
@@ -257,22 +209,25 @@ def main():
             key="map",
             width=None,
             height=500,
-            returned_objects=["last_object_clicked_coords"]
+            returned_objects=["last_object_clicked"]
         )
         
         # Hantera kartklick
-        if map_data and "last_object_clicked_coords" in map_data and map_data["last_object_clicked_coords"]:
-            clicked = map_data["last_object_clicked_coords"]
-            coords = (clicked["lat"], clicked["lng"])
-            
-            if st.session_state.map_click_mode == "start" or st.session_state.mode == "loop":
-                st.session_state.start_coords = coords
-                address = reverse_geocode(coords[0], coords[1])
-                st.info(f"Startpunkt satt: {address or f'{coords[0]:.4f}, {coords[1]:.4f}'}")
-            else:
-                st.session_state.end_coords = coords
-                address = reverse_geocode(coords[0], coords[1])
-                st.info(f"Slutpunkt satt: {address or f'{coords[0]:.4f}, {coords[1]:.4f}'}")
+        if map_data and map_data.get("last_object_clicked"):
+            clicked = map_data["last_object_clicked"]
+            if clicked.get("lat") and clicked.get("lng"):
+                coords = (clicked["lat"], clicked["lng"])
+                
+                if st.session_state.map_click_mode == "start" or st.session_state.mode == "loop":
+                    st.session_state.start_coords = coords
+                    address = reverse_geocode(coords[0], coords[1])
+                    st.info(f"Startpunkt satt: {address or f'{coords[0]:.4f}, {coords[1]:.4f}'}")
+                    st.rerun()
+                else:
+                    st.session_state.end_coords = coords
+                    address = reverse_geocode(coords[0], coords[1])
+                    st.info(f"Slutpunkt satt: {address or f'{coords[0]:.4f}, {coords[1]:.4f}'}")
+                    st.rerun()
     
     with col2:
         st.subheader("Sammanfattning")
@@ -283,8 +238,14 @@ def main():
             # Visa statistik
             st.metric("Distans", f"{route.distance/1000:.2f} km")
             st.metric("Höjdökning", f"{route.elevation_gain:.0f} m")
-            st.metric("Uppskattad tid", str(route.estimated_time).split('.')[0])
-            st.metric("Provider", route.provider)
+            
+            # Beräkna tid baserat på standardtempo
+            pace_min = 5.5  # Standard 5:30 min/km
+            time_minutes = (route.distance / 1000) * pace_min
+            hours = int(time_minutes // 60)
+            mins = int(time_minutes % 60)
+            time_str = f"{hours}:{mins:02d}" if hours > 0 else f"{mins} min"
+            st.metric("Uppskattad tid", time_str)
             
             # Toleransinfo
             target_distance = st.session_state.distance * 1000
